@@ -19,6 +19,11 @@ def train_SAC(env_name, exp_name, seed, logdir):
         'Hopper-v2': 0.2,
         'Humanoid-v2': 0.05,
         'Walker2d-v2': 0.2,
+        'RoboschoolAnt-v1': 0.1,
+        'RoboschoolHalfCheetah-v1': 0.2,
+        'RoboschoolHopper-v1': 0.2,
+        'RoboschoolHumanoid-v1': 0.05,
+        'RoboschoolWalker2d-v1': 0.2,
     }.get(env_name, 0.2)
 
     algorithm_params = {
