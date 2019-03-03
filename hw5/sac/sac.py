@@ -1,5 +1,7 @@
-import tensorflow as tf
 import time
+
+import tensorflow as tf
+
 
 class SAC:
     """Soft Actor-Critic (SAC)
@@ -47,7 +49,7 @@ class SAC:
                                                     target_value_function)
         if q_function2 is not None:
             q_function2_loss = self._q_function_loss_for(q_function2,
-                                                        target_value_function)
+                                                         target_value_function)
 
         optimizer = tf.train.AdamOptimizer(
             self._learning_rate, name='optimizer')
@@ -93,34 +95,55 @@ class SAC:
         )
         self._rewards_ph = tf.placeholder(
             tf.float32,
-            shape=(None, ),
+            shape=(None,),
             name='rewards',
         )
         self._terminals_ph = tf.placeholder(
             tf.float32,
-            shape=(None, ),
+            shape=(None,),
             name='terminals',
         )
 
     def _policy_loss_for(self, policy, q_function, q_function2, value_function):
-        if not self._reparameterize:
-            ### Problem 1.3.A
+        actions, log_pis = policy(self._observations_ph)
+        Q_sa = q_function((self._observations_ph, actions))
+        if self._reparameterize:
+            # reparam trick
+            #### Problem 1.3.B
             ### YOUR CODE HERE
-            raise NotImplementedError
+            return tf.reduce_mean(self._alpha * log_pis - Q_sa)
         else:
-            ### Problem 1.3.B
+            # REINFORCE
+            ## Problem 1.3.A
             ### YOUR CODE HERE
-            raise NotImplementedError
+
+            V_s = value_function(self._observations_ph)
+            policy_loss = log_pis * (tf.stop_gradient(self._alpha * log_pis - Q_sa + V_s))
+            policy_loss = tf.reduce_mean(policy_loss)
+            return policy_loss
 
     def _value_function_loss_for(self, policy, q_function, q_function2, value_function):
         ### Problem 1.2.A
         ### YOUR CODE HERE
-        raise NotImplementedError
+        V_s = value_function(self._observations_ph)
+        actions, log_pis = policy(self._observations_ph)
+        Q_s = q_function((self._observations_ph, actions))
+        #probs = tf.exp(log_pis)
+        #inner_expectation = tf.stop_gradient(tf.reduce_sum(probs * (Q_s - self._alpha * log_pis), axis=1))
+        inner_expectation = tf.stop_gradient(Q_s - self._alpha * log_pis)
+        return tf.losses.mean_squared_error(inner_expectation, V_s) # Expectation is basically mean (over batch), right?
 
     def _q_function_loss_for(self, q_function, target_value_function):
         ### Problem 1.1.A
         ### YOUR CODE HERE
-        raise NotImplementedError
+        #q_values = tf.log(tf.reduce_sum(tf.exp(q_function((self._observations_ph, self._actions_ph))), axis=1)) #soft max
+        q_values = q_function((self._observations_ph, self._actions_ph))
+        targets = self._rewards_ph + self._discount * target_value_function(self._next_observations_ph) * (
+                    1 - self._terminals_ph)
+        print(q_values.shape, targets.shape)
+        loss = tf.losses.mean_squared_error(tf.stop_gradient(targets), q_values)
+        # Maybe shouldn't stop gradients?
+        return loss
 
     def _create_target_update(self, source, target):
         """Create tensorflow operations for updating target value function."""

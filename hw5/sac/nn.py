@@ -69,20 +69,16 @@ class GaussianPolicy(Network):
             distribution = distributions.MultivariateNormalDiag(
                 loc=mean,
                 scale_diag=tf.exp(log_std))
-
+            print("Reparam type", distribution.reparameterization_type)
             raw_actions = distribution.sample()
             if not self._reparameterize:
-                ### Problem 1.3.A
-                ### YOUR CODE HERE
-                raise NotImplementedError
+                tf.stop_gradient(raw_actions)
             log_probs = distribution.log_prob(raw_actions)
             log_probs -= self._squash_correction(raw_actions)
 
-            actions = None
             ### Problem 2.A
             ### YOUR CODE HERE
-            raise NotImplementedError
-
+            actions = tf.tanh(raw_actions)
             return actions, log_probs
 
         samples, log_probs = layers.Lambda(create_distribution_layer)(
@@ -92,9 +88,8 @@ class GaussianPolicy(Network):
         super(GaussianPolicy, self).build(input_shape)
 
     def _squash_correction(self, raw_actions):
-        ### Problem 2.B
-        ### YOUR CODE HERE
-        raise NotImplementedError
+        # https://github.com/haarnoja/sac/blob/master/sac/policies/gaussian_policy.py
+        return tf.reduce_sum(tf.log(1 - tf.tanh(raw_actions) ** 2 + 1e-7), axis=1)
 
     def eval(self, observation):
         assert self.built and observation.ndim == 1

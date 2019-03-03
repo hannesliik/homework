@@ -6,5 +6,5 @@ dependencies:
         - gym
         - numpy
         - tensorflow-gpu
-        - tensorflow-probability
+        - tensorflow-probability==0.4
         - seaborn

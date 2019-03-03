@@ -1,10 +1,12 @@
 import argparse
+import roboschool
 import gym
 import logz
 import numpy as np
 import os
 import tensorflow as tf
 import time
+
 
 import nn
 from sac import SAC
@@ -100,7 +102,7 @@ def train_SAC(env_name, exp_name, seed, logdir):
 
     algorithm = SAC(**algorithm_params)
 
-    tf_config = tf.ConfigProto(inter_op_parallelism_threads=1, intra_op_parallelism_threads=1)
+    tf_config = tf.ConfigProto(inter_op_parallelism_threads=4, intra_op_parallelism_threads=4)
     tf_config.gpu_options.allow_growth = True  # may need if using GPU
     with tf.Session(config=tf_config):
         algorithm.build(
@@ -123,8 +125,8 @@ def train_SAC(env_name, exp_name, seed, logdir):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env_name', type=str, default='HalfCheetah-v2')
-    parser.add_argument('--exp_name', type=str, default=None)
+    parser.add_argument('--env_name', type=str, default='RoboschoolHalfCheetah-v1')
+    parser.add_argument('--exp_name', type=str, default="experiment")
     parser.add_argument('--seed', type=int, default=1)
     parser.add_argument('--n_experiments', '-e', type=int, default=1)
     args = parser.parse_args()
