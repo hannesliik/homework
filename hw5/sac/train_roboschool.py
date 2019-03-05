@@ -33,7 +33,7 @@ def train_SAC(env_name, exp_name, seed, logdir):
         'batch_size': 256,
         'discount': 0.99,
         'learning_rate': 1e-3,
-        'reparameterize': False,
+        'reparameterize': True,
         'tau': 0.01,
         'epoch_length': 1000,
         'n_epochs': 500,

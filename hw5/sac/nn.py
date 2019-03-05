@@ -78,7 +78,8 @@ class GaussianPolicy(Network):
 
             ### Problem 2.A
             ### YOUR CODE HERE
-            actions = tf.tanh(raw_actions)
+            #actions = tf.tanh(raw_actions)
+            actions = raw_actions
             return actions, log_probs
 
         samples, log_probs = layers.Lambda(create_distribution_layer)(
@@ -89,7 +90,7 @@ class GaussianPolicy(Network):
 
     def _squash_correction(self, raw_actions):
         # https://github.com/haarnoja/sac/blob/master/sac/policies/gaussian_policy.py
-        return tf.reduce_sum(tf.log(1 - tf.tanh(raw_actions) ** 2 + 1e-7), axis=1)
+        return 0#tf.reduce_sum(tf.log(1 - tf.tanh(raw_actions) ** 2 + 1e-6), axis=1)
 
     def eval(self, observation):
         assert self.built and observation.ndim == 1
