@@ -1,20 +1,20 @@
 import argparse
-import roboschool
-import gym
-import logz
-import numpy as np
 import os
-import tensorflow as tf
 import time
-
-
-import nn
-from sac import SAC
-import utils
-
 from multiprocessing import Process
 
-def train_SAC(env_name, exp_name, seed, logdir):
+import roboschool
+import gym
+import numpy as np
+import tensorflow as tf
+
+import logz
+import nn
+import utils
+from sac import SAC
+
+
+def train_SAC(env_name, exp_name, seed, logdir, reparam=False, two_qf=False, hidden_sizes=64):
     alpha = {
         'Ant-v2': 0.1,
         'HalfCheetah-v2': 0.2,
@@ -33,7 +33,7 @@ def train_SAC(env_name, exp_name, seed, logdir):
         'batch_size': 256,
         'discount': 0.99,
         'learning_rate': 1e-3,
-        'reparameterize': True,
+        'reparameterize': reparam,
         'tau': 0.01,
         'epoch_length': 1000,
         'n_epochs': 500,
@@ -48,15 +48,15 @@ def train_SAC(env_name, exp_name, seed, logdir):
     }
 
     value_function_params = {
-        'hidden_layer_sizes': (128, 128),
+        'hidden_layer_sizes': (hidden_sizes, hidden_sizes),
     }
 
     q_function_params = {
-        'hidden_layer_sizes': (128, 128),
+        'hidden_layer_sizes': (hidden_sizes, hidden_sizes),
     }
 
     policy_params = {
-        'hidden_layer_sizes': (128, 128),
+        'hidden_layer_sizes': (hidden_sizes, hidden_sizes),
     }
 
     logz.configure_output_dir(logdir)
@@ -123,14 +123,18 @@ def train_SAC(env_name, exp_name, seed, logdir):
                 logz.log_tabular(k, v)
             logz.dump_tabular()
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--env_name', type=str, default='RoboschoolHalfCheetah-v1')
     parser.add_argument('--exp_name', type=str, default="experiment")
     parser.add_argument('--seed', type=int, default=1)
     parser.add_argument('--n_experiments', '-e', type=int, default=1)
+    parser.add_argument('--reparam', action="store_true")
+    parser.add_argument('--two_qf', action="store_true")
     args = parser.parse_args()
-
+    if args.two_qf:
+        print("using 2 qf")
     data_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'data')
 
     if not (os.path.exists(data_path)):
@@ -141,8 +145,8 @@ def main():
     processes = []
 
     for e in range(args.n_experiments):
-        seed = args.seed + 10*e
-        print('Running experiment with seed %d'%seed)
+        seed = args.seed + 10 * e
+        print('Running experiment with seed %d' % seed)
 
         def train_func():
             train_SAC(
@@ -150,7 +154,10 @@ def main():
                 exp_name=args.exp_name,
                 seed=seed,
                 logdir=os.path.join(logdir, '%d' % seed),
+                reparam=args.reparam,
+                two_qf=args.two_qf,
             )
+
         # # Awkward hacky process runs, because Tensorflow does not like
         # # repeatedly calling train_AC in the same thread.
         p = Process(target=train_func, args=tuple())
@@ -162,6 +169,7 @@ def main():
 
     for p in processes:
         p.join()
+
 
 if __name__ == '__main__':
     main()

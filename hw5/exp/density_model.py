@@ -1,7 +1,9 @@
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
+
 from ex_utils import build_mlp
+
 
 class Density_Model(object):
     def __init__(self):
@@ -12,6 +14,7 @@ class Density_Model(object):
 
     def get_prob(self, state):
         raise NotImplementedError
+
 
 class Histogram(Density_Model):
     def __init__(self, nbins, preprocessor):
@@ -37,7 +40,8 @@ class Histogram(Density_Model):
                 2. increment self.total by "increment" 
         """
         bin_name = self.preprocessor(state)
-        raise NotImplementedError
+        self.hist[bin_name] += increment
+        self.total += increment
 
     def get_count(self, states):
         """
@@ -55,8 +59,11 @@ class Histogram(Density_Model):
                     1. get the bin_name using self.preprocessor
                     2. get the value of self.hist with key bin_name
         """
-        raise NotImplementedError
-        return counts
+        counts = []
+        for state in states:
+            bin_name = self.preprocessor(state)
+            counts.append(self.hist[bin_name])
+        return np.array(counts)
 
     def get_prob(self, states):
         """
@@ -72,14 +79,17 @@ class Histogram(Density_Model):
             NOTE:
                 remember to normalize by float(self.total)
         """
-        raise NotImplementedError
+        counts = self.get_count(states)
+        probs = counts / float(self.total)
         return probs
+
 
 class RBF(Density_Model):
     """
         https://en.wikipedia.org/wiki/Radial_basis_function_kernel
         https://en.wikipedia.org/wiki/Kernel_density_estimation
     """
+
     def __init__(self, sigma):
         super(RBF, self).__init__()
         self.sigma = sigma
@@ -99,9 +109,15 @@ class RBF(Density_Model):
                 self.means: np array (B, ob_dim)
         """
         B, ob_dim = len(data), len(data[0])
-        raise NotImplementedError
-        self.means = None
+        self.means = np.array(data)
         assert self.means.shape == (B, ob_dim)
+
+    def normpdf(self, x, mean, sd):
+        "https://stackoverflow.com/questions/12412895/calculate-probability-in-normal-distribution-given-mean-std-in-python"
+        var = float(sd) ** 2
+        denom = (2 * np.pi * var) ** .5
+        num = np.exp(-(float(x) - float(mean)) ** 2 / (2 * var))
+        return num / denom
 
     def get_prob(self, states):
         """
@@ -122,7 +138,7 @@ class RBF(Density_Model):
                 1. Compute deltas: for each state in states, compute the
                     difference between that state and every mean in self.means.
                 2. Euclidean distance: sum the squared deltas
-                3. Gaussian: evaluate the probability of the state under the 
+                3. Gaussian: evaluate the probability of the state under the
                     gaussian centered around each mean. The hyperparameters
                     for the reference solution assume that you do not normalize
                     the gaussian. This is fine since the rewards will be 
@@ -133,28 +149,37 @@ class RBF(Density_Model):
         if self.means is None:
             # Return a uniform distribution if we don't have samples in the 
             # replay buffer yet.
-            return (1.0/len(states))*np.ones(len(states))
+            return (1.0 / len(states)) * np.ones(len(states))
         else:
             B, replay_dim = self.means.shape
             assert states.ndim == self.means.ndim and ob_dim == replay_dim
 
             # 1. Compute deltas
-            deltas = raise NotImplementedError
+            deltas = states[:, np.newaxis, :] - self.means
+            # raise NotImplementedError
             assert deltas.shape == (b, B, ob_dim)
 
             # 2. Euclidean distance
-            euc_dists = raise NotImplementedError
+            euc_dists = np.sqrt(np.sum(deltas ** 2, axis=2))
+            # raise NotImplementedError
             assert euc_dists.shape == (b, B)
 
             # Gaussian
-            gaussians = raise NotImplementedError
+            # https://stackoverflow.com/questions/12412895/calculate-probability-in-normal-distribution-given-mean-std-in-python
+
+            denom = (2 * np.pi * self.sigma ** 2) ** .5
+            num = np.exp(-(euc_dists ** 2 / (2 * self.sigma ** 2)))
+            gaussians = num / denom
+            # raise NotImplementedError
             assert gaussians.shape == (b, B)
 
             # 4. Average
-            densities = raise NotImplementedError
+            densities = np.mean(gaussians, axis=1)
+            # raise NotImplementedError
             assert densities.shape == (b,)
 
             return densities
+
 
 class Exemplar(Density_Model):
     def __init__(self, ob_dim, hid_dim, learning_rate, kl_weight):
@@ -191,17 +216,19 @@ class Exemplar(Density_Model):
         """
         self.state1, self.state2 = self.define_placeholders()
         self.encoder1, self.encoder2, self.prior, self.discriminator = self.forward_pass(self.state1, self.state2)
+        self.discriminator: tfp.distributions.Bernoulli = self.discriminator
         self.discrim_target = tf.placeholder(shape=[None, 1], name="discrim_target", dtype=tf.float32)
 
-        raise NotImplementedError
-        self.log_likelihood = None
-        self.likelihood = None
-        self.kl = None
+        #raise NotImplementedError
+        self.log_likelihood = self.discriminator.log_prob(1)
+        self.likelihood = self.discriminator.prob(1)
+        self.kl = self.encoder1.kl_divergence(self.prior) + self.encoder2.kl_divergence(self.prior)
         assert len(self.log_likelihood.shape) == len(self.likelihood.shape) == len(self.kl.shape) == 1
 
-        raise NotImplementedError
-        self.elbo = None
-        self.update_op = None
+        self.elbo = tf.reduce_mean(self.log_likelihood - self.kl_weight * self.kl)
+        optimizer = tf.train.AdamOptimizer(self.learning_rate)
+
+        self.update_op = optimizer.minimize(-self.elbo)
 
     def define_placeholders(self):
         state1 = tf.placeholder(shape=[None, self.ob_dim], name="s1", dtype=tf.float32)
@@ -229,8 +256,13 @@ class Exemplar(Density_Model):
 
             Hint: use build_mlp
         """
-        z_mean = raise NotImplementedError
-        z_logstd = raise NotImplementedError
+
+        z_mean = build_mlp(state, z_size, scope+"_mean", n_layers, hid_size, activation=tf.tanh,
+                           output_activation=None)
+        # raise NotImplementedError
+        z_logstd = build_mlp(state, z_size, scope+"_logstd", n_layers, hid_size, activation=tf.tanh,
+                             output_activation=None)
+        # raise NotImplementedError
         return tfp.distributions.MultivariateNormalDiag(loc=z_mean, scale_diag=tf.exp(z_logstd))
 
     def make_prior(self, z_size):
@@ -245,8 +277,11 @@ class Exemplar(Density_Model):
                 prior_mean and prior_logstd are for a standard normal distribution
                     both have dimension z_size
         """
-        prior_mean = raise NotImplementedError
-        prior_logstd = raise NotImplementedError
+
+        prior_mean = np.zeros(int(z_size))
+        # raise NotImplementedError
+        prior_logstd = np.zeros(int(z_size))  # e^0 = 1
+        # raise NotImplementedError
         return tfp.distributions.MultivariateNormalDiag(loc=prior_mean, scale_diag=tf.exp(prior_logstd))
 
     def make_discriminator(self, z, output_size, scope, n_layers, hid_size):
@@ -268,7 +303,9 @@ class Exemplar(Density_Model):
 
             Hint: use build_mlp
         """
-        logit = raise NotImplementedError
+        logit = build_mlp(z, output_size, scope, n_layers, hid_size, activation=tf.tanh,
+                  output_activation=None)
+
         return tfp.distributions.Bernoulli(logit)
 
     def forward_pass(self, state1, state2):
@@ -299,16 +336,19 @@ class Exemplar(Density_Model):
         make_discriminator = tf.make_template('decoder', self.make_discriminator)
 
         # Encoder
-        encoder1 = make_encoder1(state1, self.hid_dim/2, 'z1', n_layers=2, hid_size=self.hid_dim)
-        encoder2 = make_encoder2(state2, self.hid_dim/2, 'z2', n_layers=2, hid_size=self.hid_dim)
+        encoder1 = make_encoder1(state1, self.hid_dim / 2, 'z1', n_layers=2, hid_size=self.hid_dim)
+        encoder2 = make_encoder2(state2, self.hid_dim / 2, 'z2', n_layers=2, hid_size=self.hid_dim)
 
         # Prior
-        prior = self.make_prior(self.hid_dim/2)
+        prior = self.make_prior(self.hid_dim / 2)
 
         # Sampled Latent
-        z1 = raise NotImplementedError
-        z2 = raise NotImplementedError
-        z = raise NotImplementedError
+        z1 = encoder1.sample()
+        #raise NotImplementedError
+        z2 = encoder2.sample()
+        #raise NotImplementedError
+        z = tf.concat([z1, z2], axis=1)
+        #raise NotImplementedError
 
         # Discriminator
         discriminator = make_discriminator(z, 1, 'discriminator', n_layers=2, hid_size=self.hid_dim)
@@ -372,8 +412,10 @@ class Exemplar(Density_Model):
                     compute the probability density of x from the discriminator
                     likelihood (see homework doc)
         """
-        likelihood = raise NotImplementedError
+        likelihood = None
+        raise NotImplementedError
         # avoid divide by 0 and log(0)
-        likelihood = np.clip(np.squeeze(likelihood), 1e-5, 1-1e-5)
-        prob = raise NotImplementedError
+        likelihood = np.clip(np.squeeze(likelihood), 1e-5, 1 - 1e-5)
+        prob = None
+        raise NotImplementedError
         return prob

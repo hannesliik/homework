@@ -106,12 +106,15 @@ class SAC:
 
     def _policy_loss_for(self, policy, q_function, q_function2, value_function):
         actions, log_pis = policy(self._observations_ph)
-        Q_sa = q_function((self._observations_ph, actions))
+        if q_function2 is not None:
+            Q_sa = tf.minimum(q_function((self._observations_ph, actions)), q_function2((self._observations_ph, actions)))
+        else:
+            Q_sa = q_function((self._observations_ph, actions))
         if self._reparameterize:
             # reparam trick
             #### Problem 1.3.B
             ### YOUR CODE HERE
-            return tf.reduce_mean(self._alpha * log_pis - Q_sa)
+            return tf.reduce_mean(self._alpha * log_pis - tf.log(Q_sa))
         else:
             # REINFORCE
             ## Problem 1.3.A
@@ -127,7 +130,11 @@ class SAC:
         ### YOUR CODE HERE
         V_s = value_function(self._observations_ph)
         actions, log_pis = policy(self._observations_ph)
-        Q_s = q_function((self._observations_ph, actions))
+        if q_function2 is not None:
+            Q_s = tf.minimum(q_function((self._observations_ph, actions)),
+                              q_function2((self._observations_ph, actions)))
+        else:
+            Q_s = q_function((self._observations_ph, actions))
         #probs = tf.exp(log_pis)
         #inner_expectation = tf.stop_gradient(tf.reduce_sum(probs * (Q_s - self._alpha * log_pis), axis=1))
         inner_expectation = tf.stop_gradient(Q_s - self._alpha * log_pis)
