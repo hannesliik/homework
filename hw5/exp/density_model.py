@@ -219,9 +219,9 @@ class Exemplar(Density_Model):
         self.discriminator: tfp.distributions.Bernoulli = self.discriminator
         self.discrim_target = tf.placeholder(shape=[None, 1], name="discrim_target", dtype=tf.float32)
 
-        #raise NotImplementedError
-        self.log_likelihood = self.discriminator.log_prob(1)
-        self.likelihood = self.discriminator.prob(1)
+        # raise NotImplementedError
+        self.log_likelihood = tf.squeeze(self.discriminator.log_prob(self.discrim_target, axis=1))
+        self.likelihood = tf.squeeze(self.discriminator.prob(self.discrim_target, axis=1))
         self.kl = self.encoder1.kl_divergence(self.prior) + self.encoder2.kl_divergence(self.prior)
         assert len(self.log_likelihood.shape) == len(self.likelihood.shape) == len(self.kl.shape) == 1
 
@@ -257,11 +257,12 @@ class Exemplar(Density_Model):
             Hint: use build_mlp
         """
 
-        z_mean = build_mlp(state, z_size, scope+"_mean", n_layers, hid_size, activation=tf.tanh,
+        z_mean = build_mlp(state, z_size, scope + "_mean", n_layers, hid_size, activation=tf.tanh,
                            output_activation=None)
         # raise NotImplementedError
-        z_logstd = build_mlp(state, z_size, scope+"_logstd", n_layers, hid_size, activation=tf.tanh,
-                             output_activation=None)
+        # z_logstd = build_mlp(state, z_size, scope+"_logstd", n_layers, hid_size, activation=tf.tanh,
+        #                     output_activation=None)
+        z_logstd = tf.Variable(tf.zeros(z_size), name=scope + "_std")
         # raise NotImplementedError
         return tfp.distributions.MultivariateNormalDiag(loc=z_mean, scale_diag=tf.exp(z_logstd))
 
@@ -304,7 +305,7 @@ class Exemplar(Density_Model):
             Hint: use build_mlp
         """
         logit = build_mlp(z, output_size, scope, n_layers, hid_size, activation=tf.tanh,
-                  output_activation=None)
+                          output_activation=None)
 
         return tfp.distributions.Bernoulli(logit)
 
@@ -344,11 +345,11 @@ class Exemplar(Density_Model):
 
         # Sampled Latent
         z1 = encoder1.sample()
-        #raise NotImplementedError
+        # raise NotImplementedError
         z2 = encoder2.sample()
-        #raise NotImplementedError
+        # raise NotImplementedError
         z = tf.concat([z1, z2], axis=1)
-        #raise NotImplementedError
+        # raise NotImplementedError
 
         # Discriminator
         discriminator = make_discriminator(z, 1, 'discriminator', n_layers=2, hid_size=self.hid_dim)
@@ -373,7 +374,10 @@ class Exemplar(Density_Model):
         assert state1.ndim == state2.ndim == target.ndim
         assert state1.shape[1] == state2.shape[1] == self.ob_dim
         assert state1.shape[0] == state2.shape[0] == target.shape[0]
-        raise NotImplementedError
+        ll, kl, elbo = self.sess.run([self.log_likelihood, self.kl, self.elbo, self.update_op],
+                                     feed_dict={self.state1: state1,
+                                                self.state2: state2,
+                                                self.discrim_target: target})
         return ll, kl, elbo
 
     def get_likelihood(self, state1, state2):
@@ -394,7 +398,8 @@ class Exemplar(Density_Model):
         assert state1.ndim == state2.ndim
         assert state1.shape[1] == state2.shape[1] == self.ob_dim
         assert state1.shape[0] == state2.shape[0]
-        raise NotImplementedError
+        likelihood = self.sess.run(self.likelihood, {self.state1: state1, self.state2: state2,
+                                                     self.discrim_target: np.ones((state1.shape[0], 1))})
         return likelihood
 
     def get_prob(self, state):
@@ -412,10 +417,8 @@ class Exemplar(Density_Model):
                     compute the probability density of x from the discriminator
                     likelihood (see homework doc)
         """
-        likelihood = None
-        raise NotImplementedError
+        likelihood = self.get_likelihood(state, state)
         # avoid divide by 0 and log(0)
         likelihood = np.clip(np.squeeze(likelihood), 1e-5, 1 - 1e-5)
-        prob = None
-        raise NotImplementedError
+        prob = (1 - likelihood) / likelihood
         return prob
