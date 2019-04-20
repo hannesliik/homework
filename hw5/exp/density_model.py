@@ -220,8 +220,8 @@ class Exemplar(Density_Model):
         self.discrim_target = tf.placeholder(shape=[None, 1], name="discrim_target", dtype=tf.float32)
 
         # raise NotImplementedError
-        self.log_likelihood = tf.squeeze(self.discriminator.log_prob(self.discrim_target, axis=1))
-        self.likelihood = tf.squeeze(self.discriminator.prob(self.discrim_target, axis=1))
+        self.log_likelihood = tf.squeeze(self.discriminator.log_prob(self.discrim_target), axis=1)
+        self.likelihood = tf.squeeze(self.discriminator.prob(self.discrim_target), axis=1)
         self.kl = self.encoder1.kl_divergence(self.prior) + self.encoder2.kl_divergence(self.prior)
         assert len(self.log_likelihood.shape) == len(self.likelihood.shape) == len(self.kl.shape) == 1
 
@@ -262,7 +262,7 @@ class Exemplar(Density_Model):
         # raise NotImplementedError
         # z_logstd = build_mlp(state, z_size, scope+"_logstd", n_layers, hid_size, activation=tf.tanh,
         #                     output_activation=None)
-        z_logstd = tf.Variable(tf.zeros(z_size), name=scope + "_std")
+        z_logstd = tf.Variable(tf.zeros(z_size, dtype=tf.float32), name=scope + "_std")
         # raise NotImplementedError
         return tfp.distributions.MultivariateNormalDiag(loc=z_mean, scale_diag=tf.exp(z_logstd))
 
@@ -279,9 +279,9 @@ class Exemplar(Density_Model):
                     both have dimension z_size
         """
 
-        prior_mean = np.zeros(int(z_size))
+        prior_mean = np.zeros(int(z_size), dtype=np.float32)
         # raise NotImplementedError
-        prior_logstd = np.zeros(int(z_size))  # e^0 = 1
+        prior_logstd = np.zeros(int(z_size),dtype=np.float32)  # e^0 = 1
         # raise NotImplementedError
         return tfp.distributions.MultivariateNormalDiag(loc=prior_mean, scale_diag=tf.exp(prior_logstd))
 
@@ -374,7 +374,7 @@ class Exemplar(Density_Model):
         assert state1.ndim == state2.ndim == target.ndim
         assert state1.shape[1] == state2.shape[1] == self.ob_dim
         assert state1.shape[0] == state2.shape[0] == target.shape[0]
-        ll, kl, elbo = self.sess.run([self.log_likelihood, self.kl, self.elbo, self.update_op],
+        ll, kl, elbo, _ = self.sess.run([self.log_likelihood, self.kl, self.elbo, self.update_op],
                                      feed_dict={self.state1: state1,
                                                 self.state2: state2,
                                                 self.discrim_target: target})

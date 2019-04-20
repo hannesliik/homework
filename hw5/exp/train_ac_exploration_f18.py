@@ -7,6 +7,7 @@ Adapted for CS294-112 Fall 2018 with <3 by Michael Chang, some experiments by Gr
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
+import roboschool
 import gym
 import logz
 import os

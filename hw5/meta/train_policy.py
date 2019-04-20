@@ -4,28 +4,28 @@ Adapted for CS294-112 Fall 2017 by Abhishek Gupta and Joshua Achiam
 Adapted for CS294-112 Fall 2018 by Michael Chang and Soroush Nasiriany
 Adapted for use in CS294-112 Fall 2018 HW5 by Kate Rakelly and Michael Chang
 """
-import numpy as np
-import pdb
-import random
-import pickle
-import tensorflow as tf
-import tensorflow_probability as tfp
-import gym
-import logz
-import scipy.signal
-import os
-import time
 import inspect
+import os
+import pickle
+import random
+import time
 from multiprocessing import Process
 
-from replay_buffer import ReplayBuffer, PPOReplayBuffer
+import keras
+import numpy as np
+import scipy.signal
+import tensorflow as tf
+import tensorflow_probability as tfp
 
+import logz
 from point_mass import PointEnv
 from point_mass_observed import ObservedPointEnv
+from replay_buffer import ReplayBuffer, PPOReplayBuffer
 
-#============================================================================================#
+
+# ============================================================================================#
 # Utilities
-#============================================================================================#
+# ============================================================================================#
 def minimize_and_clip(optimizer, objective, var_list, clip_val=10):
     """
     minimized `objective` using `optimizer` w.r.t. variables in
@@ -37,6 +37,7 @@ def minimize_and_clip(optimizer, objective, var_list, clip_val=10):
         if grad is not None:
             gradients[i] = (tf.clip_by_norm(grad, clip_val), var)
     return optimizer.apply_gradients(gradients)
+
 
 def build_mlp(x, output_size, scope, n_layers, size, activation=tf.tanh, output_activation=None, regularizer=None):
     """
@@ -52,10 +53,13 @@ def build_mlp(x, output_size, scope, n_layers, size, activation=tf.tanh, output_
     """
     i = 0
     for i in range(n_layers):
-        x = tf.layers.dense(inputs=x,units=size, activation=activation, name='fc{}'.format(i), kernel_regularizer=regularizer, bias_regularizer=regularizer)
+        x = tf.layers.dense(inputs=x, units=size, activation=activation, name='fc{}'.format(i),
+                            kernel_regularizer=regularizer, bias_regularizer=regularizer)
 
-    x = tf.layers.dense(inputs=x, units=output_size, activation=output_activation, name='fc{}'.format(i + 1), kernel_regularizer=regularizer, bias_regularizer=regularizer)
+    x = tf.layers.dense(inputs=x, units=output_size, activation=output_activation, name='fc{}'.format(i + 1),
+                        kernel_regularizer=regularizer, bias_regularizer=regularizer)
     return x
+
 
 def build_rnn(x, h, output_size, scope, n_layers, size, activation=tf.tanh, output_activation=None, regularizer=None):
     """
@@ -71,12 +75,22 @@ def build_rnn(x, h, output_size, scope, n_layers, size, activation=tf.tanh, outp
 
     hint: use `build_mlp()`
     """
-    #====================================================================================#
+    # ====================================================================================#
     #                           ----------PROBLEM 2----------
-    #====================================================================================#
+    # ====================================================================================#
     # YOUR CODE HERE
+    rnn = tf.keras.layers.CuDNNGRU(output_size,
+                               recurrent_regularizer=regularizer, kernel_regularizer=regularizer,
+                               bias_regularizer=regularizer, return_state=True)
 
-def build_policy(x, h, output_size, scope, n_layers, size, gru_size, recurrent=True, activation=tf.tanh, output_activation=None):
+    x = build_mlp(x, output_size=size, size=size, scope=scope, n_layers=n_layers, activation=activation)
+
+    x, h = rnn(x, h,)
+    return x, h
+
+
+def build_policy(x, h, output_size, scope, n_layers, size, gru_size, recurrent=True, activation=tf.tanh,
+                 output_activation=None):
     """
     build recurrent policy
 
@@ -102,12 +116,16 @@ def build_policy(x, h, output_size, scope, n_layers, size, gru_size, recurrent=T
         if recurrent:
             x, h = build_rnn(x, h, gru_size, scope, n_layers, size, activation=activation, output_activation=activation)
         else:
-            x = tf.reshape(x, (-1, x.get_shape()[1]*x.get_shape()[2]))
+            x = tf.reshape(x, (-1, x.get_shape()[1] * x.get_shape()[2]))
             x = build_mlp(x, gru_size, scope, n_layers + 1, size, activation=activation, output_activation=activation)
-        x = tf.layers.dense(x, output_size, activation=output_activation, kernel_initializer=tf.initializers.truncated_normal(mean=0.0, stddev=0.01), bias_initializer=tf.zeros_initializer(), name='decoder')
+        x = tf.layers.dense(x, output_size, activation=output_activation,
+                            kernel_initializer=tf.initializers.truncated_normal(mean=0.0, stddev=0.01),
+                            bias_initializer=tf.zeros_initializer(), name='decoder')
     return x, h
 
-def build_critic(x, h, output_size, scope, n_layers, size, gru_size, recurrent=True, activation=tf.tanh, output_activation=None, regularizer=None):
+
+def build_critic(x, h, output_size, scope, n_layers, size, gru_size, recurrent=True, activation=tf.tanh,
+                 output_activation=None, regularizer=None):
     """
     build recurrent critic
 
@@ -119,22 +137,29 @@ def build_critic(x, h, output_size, scope, n_layers, size, gru_size, recurrent=T
     """
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         if recurrent:
-            x, h = build_rnn(x, h, gru_size, scope, n_layers, size, activation=activation, output_activation=output_activation, regularizer=regularizer)
+            x, h = build_rnn(x, h, gru_size, scope, n_layers, size, activation=activation,
+                             output_activation=output_activation, regularizer=regularizer)
         else:
-            x = tf.reshape(x, (-1, x.get_shape()[1]*x.get_shape()[2]))
-            x = build_mlp(x, gru_size, scope, n_layers + 1, size, activation=activation, output_activation=activation, regularizer=regularizer)
-        x = tf.layers.dense(x, output_size, activation=output_activation, name='decoder', kernel_regularizer=regularizer, bias_regularizer=regularizer)
+            x = tf.reshape(x, (-1, x.get_shape()[1] * x.get_shape()[2]))
+            x = build_mlp(x, gru_size, scope, n_layers + 1, size, activation=activation, output_activation=activation,
+                          regularizer=regularizer)
+        x = tf.layers.dense(x, output_size, activation=output_activation, name='decoder',
+                            kernel_regularizer=regularizer, bias_regularizer=regularizer)
     return x
+
 
 def pathlength(path):
     return len(path["reward"])
 
+
 def discounted_return(reward, gamma):
-    discounts = gamma**np.arange(len(reward))
+    discounts = gamma ** np.arange(len(reward))
     return sum(discounts * reward)
+
 
 def discount_cumsum(x, discount):
     return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
+
 
 def setup_logger(logdir, locals_):
     # Configure output directory for logging
@@ -155,7 +180,7 @@ class Agent(object):
         self.terminal_dim = 1
 
         self.meta_ob_dim = self.ob_dim + self.ac_dim + self.reward_dim + self.terminal_dim
-        self.scope  = 'continuous_logits'
+        self.scope = 'continuous_logits'
         self.size = computation_graph_args['size']
         self.gru_size = computation_graph_args['gru_size']
         self.n_layers = computation_graph_args['n_layers']
@@ -173,15 +198,17 @@ class Agent(object):
         self.nn_critic = estimate_return_args['nn_critic']
         self.normalize_advantages = estimate_return_args['normalize_advantages']
 
-        self.replay_buffer = ReplayBuffer(100000, [self.history, self.meta_ob_dim], [self.ac_dim], self.gru_size, self.task_dim)
-        self.val_replay_buffer = ReplayBuffer(100000, [self.history, self.meta_ob_dim], [self.ac_dim], self.gru_size, self.task_dim)
+        self.replay_buffer = ReplayBuffer(100000, [self.history, self.meta_ob_dim], [self.ac_dim], self.gru_size,
+                                          self.task_dim)
+        self.val_replay_buffer = ReplayBuffer(100000, [self.history, self.meta_ob_dim], [self.ac_dim], self.gru_size,
+                                              self.task_dim)
 
     def init_tf_sess(self):
         tf_config = tf.ConfigProto(inter_op_parallelism_threads=1, intra_op_parallelism_threads=1)
-        tf_config.gpu_options.allow_growth = True # may need if using GPU
+        tf_config.gpu_options.allow_growth = True  # may need if using GPU
         self.sess = tf.Session(config=tf_config)
-        self.sess.__enter__() # equivalent to `with self.sess:`
-        tf.global_variables_initializer().run() #pylint: disable=E1101
+        self.sess.__enter__()  # equivalent to `with self.sess:`
+        tf.global_variables_initializer().run()  # pylint: disable=E1101
 
     def define_placeholders(self):
         """
@@ -228,7 +255,9 @@ class Agent(object):
 
         """
         # ac_dim * 2 because we predict both mean and std
-        sy_policy_params, sy_hidden = build_policy(sy_ob_no, sy_hidden, self.ac_dim*2, self.scope, n_layers=self.n_layers, size=self.size, gru_size=self.gru_size, recurrent=self.recurrent)
+        sy_policy_params, sy_hidden = build_policy(sy_ob_no, sy_hidden, self.ac_dim * 2, self.scope,
+                                                   n_layers=self.n_layers, size=self.size, gru_size=self.gru_size,
+                                                   recurrent=self.recurrent)
         return (sy_policy_params, sy_hidden)
 
     def sample_action(self, policy_parameters):
@@ -312,7 +341,9 @@ class Agent(object):
 
         # PPO critic update
         critic_regularizer = tf.contrib.layers.l2_regularizer(1e-3) if self.l2reg else None
-        self.critic_prediction = tf.squeeze(build_critic(self.sy_ob_no, self.sy_hidden, 1, 'critic_network', n_layers=self.n_layers, size=self.size, gru_size=self.gru_size, recurrent=self.recurrent, regularizer=critic_regularizer))
+        self.critic_prediction = tf.squeeze(
+            build_critic(self.sy_ob_no, self.sy_hidden, 1, 'critic_network', n_layers=self.n_layers, size=self.size,
+                         gru_size=self.gru_size, recurrent=self.recurrent, regularizer=critic_regularizer))
         self.sy_target_n = tf.placeholder(shape=[None], name="critic_target", dtype=tf.float32)
         self.critic_loss = tf.losses.mean_squared_error(self.sy_target_n, self.critic_prediction)
         self.critic_weights = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='critic_network')
@@ -323,14 +354,15 @@ class Agent(object):
         self.policy_surr_loss = self.ppo_loss(self.sy_lp_n, self.sy_fixed_lp_n, self.sy_adv_n)
         self.policy_weights = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.scope)
         optimizer = tf.train.AdamOptimizer(self.learning_rate)
-        self.policy_update_op = minimize_and_clip(optimizer, self.policy_surr_loss, var_list=self.policy_weights, clip_val=40)
+        self.policy_update_op = minimize_and_clip(optimizer, self.policy_surr_loss, var_list=self.policy_weights,
+                                                  clip_val=40)
 
     def sample_trajectories(self, itr, env, min_timesteps, is_evaluation=False):
         # Collect paths until we have enough timesteps
         timesteps_this_batch = 0
         stats = []
         while True:
-            animate_this_episode=(len(stats)==0 and (itr % 10 == 0) and self.animate)
+            animate_this_episode = (len(stats) == 0 and (itr % 10 == 0) and self.animate)
             steps, s = self.sample_trajectory(env, animate_this_episode, is_evaluation=is_evaluation)
             stats += s
             timesteps_this_batch += steps
@@ -357,9 +389,9 @@ class Agent(object):
         """
         env.reset_task(is_evaluation=is_evaluation)
         stats = []
-        #====================================================================================#
+        # ====================================================================================#
         #                           ----------PROBLEM 1----------
-        #====================================================================================#
+        # ====================================================================================#
         ep_steps = 0
         steps = 0
 
@@ -377,6 +409,11 @@ class Agent(object):
                 # first meta ob has only the observation
                 # set a, r, d to zero, construct first meta observation in meta_obs
                 # YOUR CODE HERE
+                # self.ob_dim + self.ac_dim + self.reward_dim + self.terminal_dim
+                meta_ob = np.concatenate((ob, np.zeros(self.ac_dim), np.zeros(self.reward_dim),
+                                          np.zeros(self.terminal_dim)))
+
+                meta_obs[0, :] = meta_ob
 
                 steps += 1
 
@@ -386,20 +423,33 @@ class Agent(object):
 
             hidden = np.zeros((1, self.gru_size), dtype=np.float32)
 
+            in_ = np.zeros((self.history, self.meta_ob_dim))
+
+            zlice = slice(max(steps - self.history, 0), steps)
+            in_[max(self.history - steps, 0):] = meta_obs[zlice]
+
             # get action from the policy
             # YOUR CODE HERE
+            ac = self.sess.run([self.sy_sampled_ac],
+                               feed_dict={self.sy_ob_no: in_[np.newaxis, :], self.sy_hidden: hidden})
+            ac = ac[0][0]  # Get rid of batch dimension(s)
 
             # step the environment
             # YOUR CODE HERE
-
+            ob, rew, done, info = env.step(ac)
             ep_steps += 1
 
             done = bool(done) or ep_steps == self.max_path_length
             # construct the meta-observation and add it to meta_obs
             # YOUR CODE HERE
 
+            meta_ob = np.concatenate((ob, ac, [rew],
+                                      [done]))
+            meta_obs[steps, :] = meta_ob
             rewards.append(rew)
             steps += 1
+
+            # python train_policy.py 'pm-obs' --exp_name < experiment_name >  --history 1 -lr 5e-5 -n 200 --num_tasks 4
 
             # add sample to replay buffer
             if is_evaluation:
@@ -411,7 +461,7 @@ class Agent(object):
             if done:
                 # compute stats over trajectory
                 s = dict()
-                s['rewards']= rewards[-ep_steps:]
+                s['rewards'] = rewards[-ep_steps:]
                 s['ep_len'] = ep_steps
                 stats.append(s)
                 ep_steps = 0
@@ -443,7 +493,8 @@ class Agent(object):
         bsize = len(re_n)
         rewards = np.squeeze(re_n)
         masks = np.squeeze(masks)
-        values = self.sess.run(self.critic_prediction, feed_dict={self.sy_ob_no: ob_no, self.sy_hidden: hidden})[:,None]
+        values = self.sess.run(self.critic_prediction, feed_dict={self.sy_ob_no: ob_no, self.sy_hidden: hidden})[:,
+                 None]
         gamma = self.gamma
 
         assert rewards.shape == masks.shape == (bsize,)
@@ -468,7 +519,6 @@ class Agent(object):
 
         advantages = (advantages - np.mean(advantages, axis=0)) / np.std(advantages, axis=0)
         return advantages, returns
-
 
     def estimate_return(self, ob_no, re_n, hidden, masks):
         """
@@ -528,7 +578,7 @@ class Agent(object):
         requires:
             self.num_value_iters
         """
-        target_n = (q_n - np.mean(q_n))/(np.std(q_n)+1e-8)
+        target_n = (q_n - np.mean(q_n)) / (np.std(q_n) + 1e-8)
         for k in range(self.num_value_iters):
             critic_loss, _ = self.sess.run(
                 [self.critic_loss, self.critic_update_op],
@@ -544,7 +594,8 @@ class Agent(object):
         '''
         policy_surr_loss, _ = self.sess.run(
             [self.policy_surr_loss, self.policy_update_op],
-            feed_dict={self.sy_ob_no: ob_no, self.sy_hidden: hidden, self.sy_ac_na: ac_na, self.sy_fixed_lp_n: fixed_log_probs, self.sy_adv_n: advantages})
+            feed_dict={self.sy_ob_no: ob_no, self.sy_hidden: hidden, self.sy_ac_na: ac_na,
+                       self.sy_fixed_lp_n: fixed_log_probs, self.sy_adv_n: advantages})
         return policy_surr_loss
 
     def ppo_loss(self, log_probs, fixed_log_probs, advantages, clip_epsilon=0.1, entropy_coeff=1e-4):
@@ -567,7 +618,8 @@ class Agent(object):
         """
         ratio = tf.exp(log_probs - fixed_log_probs)
         surr1 = ratio * advantages
-        surr2 = tf.clip_by_value(ratio, clip_value_min=1.0-clip_epsilon, clip_value_max=1.0+clip_epsilon) * advantages
+        surr2 = tf.clip_by_value(ratio, clip_value_min=1.0 - clip_epsilon,
+                                 clip_value_max=1.0 + clip_epsilon) * advantages
         policy_surr_loss = -tf.reduce_mean(tf.minimum(surr1, surr2))
 
         probs = tf.exp(log_probs)
@@ -599,24 +651,24 @@ def train_PG(
         num_tasks,
         l2reg,
         recurrent,
-        ):
-
+        interval=1
+):
     start = time.time()
 
-    #========================================================================================#
+    # ========================================================================================#
     # Set Up Logger
-    #========================================================================================#
+    # ========================================================================================#
     setup_logger(logdir, locals())
 
-    #========================================================================================#
+    # ========================================================================================#
     # Set Up Env
-    #========================================================================================#
+    # ========================================================================================#
 
     # Make the gym environment
     envs = {'pm': PointEnv,
             'pm-obs': ObservedPointEnv,
             }
-    env = envs[env_name](num_tasks)
+    env = envs[env_name](num_tasks, interval)
 
     # Set random seeds
     tf.set_random_seed(seed)
@@ -630,11 +682,11 @@ def train_PG(
     # Observation and action sizes
     ob_dim = env.observation_space.shape[0]
     ac_dim = env.action_space.shape[0]
-    task_dim = len(env._goal) # rude, sorry
+    task_dim = len(env._goal)  # rude, sorry
 
-    #========================================================================================#
+    # ========================================================================================#
     # Initialize Agent
-    #========================================================================================#
+    # ========================================================================================#
     computation_graph_args = {
         'n_layers': n_layers,
         'ob_dim': ob_dim,
@@ -647,7 +699,7 @@ def train_PG(
         'num_value_iters': num_value_iters,
         'l2reg': l2reg,
         'recurrent': recurrent,
-        }
+    }
 
     sample_trajectory_args = {
         'animate': animate,
@@ -666,13 +718,12 @@ def train_PG(
     # build computation graph
     agent.build_computation_graph()
 
-
     # tensorflow: config, session, variable initialization
     agent.init_tf_sess()
 
-    #========================================================================================#
+    # ========================================================================================#
     # Training Loop
-    #========================================================================================#
+    # ========================================================================================#
     def unpack_sample(data):
         '''
         unpack a sample from the replay buffer
@@ -693,7 +744,7 @@ def train_PG(
         ppo_buffer.flush()
 
         # sample trajectories to fill agent's replay buffer
-        print("********** Iteration %i ************"%itr)
+        print("********** Iteration %i ************" % itr)
         stats = []
         for _ in range(num_tasks):
             s, timesteps_this_batch = agent.sample_trajectories(itr, env, min_timesteps_per_batch)
@@ -706,14 +757,14 @@ def train_PG(
         data = agent.replay_buffer.all_batch()
         ob_no, ac_na, re_n, hidden, masks = unpack_sample(data)
         fixed_log_probs = agent.sess.run(agent.sy_lp_n,
-            feed_dict={agent.sy_ob_no: ob_no, agent.sy_hidden: hidden, agent.sy_ac_na: ac_na})
+                                         feed_dict={agent.sy_ob_no: ob_no, agent.sy_hidden: hidden,
+                                                    agent.sy_ac_na: ac_na})
         q_n, adv_n = agent.estimate_return(ob_no, re_n, hidden, masks)
 
         ppo_buffer.add_samples(fixed_log_probs, adv_n, q_n)
 
         # update with mini-batches sampled from ppo buffer
         for _ in range(num_ppo_updates):
-
             data = ppo_buffer.random_batch(mini_batch_size)
 
             ob_no, ac_na, re_n, hidden, masks = unpack_sample(data)
@@ -722,7 +773,8 @@ def train_PG(
             q_n = data["returns"]
 
             log_probs = agent.sess.run(agent.sy_lp_n,
-                feed_dict={agent.sy_ob_no: ob_no, agent.sy_hidden: hidden, agent.sy_ac_na: ac_na})
+                                       feed_dict={agent.sy_ob_no: ob_no, agent.sy_hidden: hidden,
+                                                  agent.sy_ac_na: ac_na})
 
             agent.update_parameters(ob_no, hidden, ac_na, fixed_log_probs, q_n, adv_n)
 
@@ -730,10 +782,12 @@ def train_PG(
         print('Validating...')
         val_stats = []
         for _ in range(num_tasks):
-            vs, timesteps_this_batch = agent.sample_trajectories(itr, env, min_timesteps_per_batch // 10, is_evaluation=True)
+            vs, timesteps_this_batch = agent.sample_trajectories(itr, env, min_timesteps_per_batch // 10,
+                                                                 is_evaluation=True)
             val_stats += vs
 
         # save trajectories for viz
+        os.makedirs("output", exist_ok=True)
         with open("output/{}-epoch{}.pkl".format(exp_name, itr), 'wb') as f:
             pickle.dump(agent.val_replay_buffer.all_batch(), f, pickle.HIGHEST_PROTOCOL)
         agent.val_replay_buffer.flush()
@@ -788,13 +842,14 @@ def main():
     parser.add_argument('--history', '-ho', type=int, default=1)
     parser.add_argument('--l2reg', '-reg', action='store_true')
     parser.add_argument('--recurrent', '-rec', action='store_true')
+    parser.add_argument('--interval', type=float, default=0)
     args = parser.parse_args()
 
-    if not(os.path.exists('data')):
+    if not (os.path.exists('data')):
         os.makedirs('data')
     logdir = args.exp_name + '_' + args.env_name + '_' + time.strftime("%d-%m-%Y_%H-%M-%S")
     logdir = os.path.join('data', logdir)
-    if not(os.path.exists(logdir)):
+    if not (os.path.exists(logdir)):
         os.makedirs(logdir)
 
     max_path_length = args.ep_len if args.ep_len > 0 else None
@@ -802,8 +857,8 @@ def main():
     processes = []
 
     for e in range(args.n_experiments):
-        seed = args.seed + 10*e
-        print('Running experiment with seed %d'%seed)
+        seed = args.seed + 10 * e
+        print('Running experiment with seed %d' % seed)
 
         def train_func():
             train_PG(
@@ -818,8 +873,8 @@ def main():
                 num_ppo_updates=(args.batch_size // args.mini_batch_size) * 5,
                 num_value_iters=args.num_value_iters,
                 animate=args.render,
-                logdir=os.path.join(logdir,'%d'%seed),
-                normalize_advantages=not(args.dont_normalize_advantages),
+                logdir=os.path.join(logdir, '%d' % seed),
+                normalize_advantages=not (args.dont_normalize_advantages),
                 nn_critic=args.nn_critic,
                 seed=seed,
                 n_layers=args.n_layers,
@@ -829,7 +884,9 @@ def main():
                 num_tasks=args.num_tasks,
                 l2reg=args.l2reg,
                 recurrent=args.recurrent,
-                )
+                interval=args.interval
+            )
+
         # # Awkward hacky process runs, because Tensorflow does not like
         # # repeatedly calling train_PG in the same thread.
         p = Process(target=train_func, args=tuple())

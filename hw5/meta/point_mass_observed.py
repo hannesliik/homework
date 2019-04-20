@@ -16,13 +16,15 @@ class ObservedPointEnv(Env):
     #                           ----------PROBLEM 1----------
     #====================================================================================#
     # YOUR CODE SOMEWHERE HERE
-    def __init__(self, num_tasks=1):
+    def __init__(self, num_tasks=1, interval=1):
         self.tasks = [0, 1, 2, 3][:num_tasks]
+        self.num_tasks = num_tasks
         self.task_idx = -1
         self.reset_task()
         self.reset()
 
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(2,))
+        #self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(2,))
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(2 + num_tasks,))
         self.action_space = spaces.Box(low=-0.1, high=0.1, shape=(2,))
 
     def reset_task(self, is_evaluation=False):
@@ -38,7 +40,10 @@ class ObservedPointEnv(Env):
 
     def reset(self):
         self._state = np.array([0, 0], dtype=np.float32)
-        return self._get_obs()
+        one_hot_task = np.zeros(self.num_tasks)
+        one_hot_task[self.task_idx] = 1
+        ob = np.concatenate((self._get_obs().squeeze(), one_hot_task))
+        return ob
 
     def _get_obs(self):
         return np.copy(self._state)
@@ -53,7 +58,12 @@ class ObservedPointEnv(Env):
         done = abs(x) < 0.01 and abs(y) < 0.01
         # move to next state
         self._state = self._state + action
-        ob = self._get_obs()
+
+        one_hot_task = np.zeros(self.num_tasks)
+        one_hot_task[self.task_idx] = 1
+
+        ob = np.concatenate((self._get_obs().squeeze(), one_hot_task))
+
         return ob, reward, done, dict()
 
     def viewer_setup(self):
